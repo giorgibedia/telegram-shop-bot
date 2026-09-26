@@ -80,10 +80,10 @@ Welcome to the #1 premium digital store for AI tools, subscriptions, and digital
             { source: bannerPath },
             { caption: welcomeText, parse_mode: 'Markdown', ...getMainKeyboard(ctx) }
         ).catch(async () => {
-            await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx));
+            await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx)).catch(() => {});
         });
     } else {
-        await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx));
+        await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx)).catch(() => {});
     }
 });
 
@@ -1364,7 +1364,15 @@ Binance has not synced this Order ID yet.
 
 // Error handling
 bot.catch((err, ctx) => {
-    console.error(`Error for ${ctx.updateType}:`, err);
+    console.error(`Error for ${ctx ? ctx.updateType : 'unknown'}:`, err && err.message ? err.message : err);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('⚠️ Unhandled Rejection:', reason && reason.message ? reason.message : reason);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('⚠️ Uncaught Exception:', err && err.message ? err.message : err);
 });
 
 // Start the bot
