@@ -74,16 +74,43 @@ Welcome to the #1 premium digital store for AI tools, subscriptions, and digital
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 👇 *Select an option from the menu below to get started:*`;
 
+    const animPath = path.resolve(__dirname, '..', 'assets', 'chatgpt_welcome.mp4');
     const bannerPath = path.resolve(__dirname, '..', 'assets', 'banner.jpg');
-    if (fs.existsSync(bannerPath)) {
-        await ctx.replyWithPhoto(
-            { source: bannerPath },
-            { caption: welcomeText, parse_mode: 'Markdown', ...getMainKeyboard(ctx) }
-        ).catch(async () => {
-            await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx)).catch(() => {});
+    const CHATGPT_ANIMATION_ID = 'CgACAgIAAxkDAAICzWq4AoScVUzqP7vgEd_o27HbnuMGAALepAACabnBSYeFPd-MsDBcPQQ';
+
+    try {
+        await ctx.replyWithAnimation(CHATGPT_ANIMATION_ID, {
+            caption: welcomeText,
+            parse_mode: 'Markdown',
+            ...getMainKeyboard(ctx)
         });
-    } else {
-        await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx)).catch(() => {});
+    } catch (animErr) {
+        if (fs.existsSync(animPath)) {
+            await ctx.replyWithAnimation(
+                { source: animPath },
+                { caption: welcomeText, parse_mode: 'Markdown', ...getMainKeyboard(ctx) }
+            ).catch(async () => {
+                if (fs.existsSync(bannerPath)) {
+                    await ctx.replyWithPhoto(
+                        { source: bannerPath },
+                        { caption: welcomeText, parse_mode: 'Markdown', ...getMainKeyboard(ctx) }
+                    ).catch(async () => {
+                        await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx)).catch(() => {});
+                    });
+                } else {
+                    await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx)).catch(() => {});
+                }
+            });
+        } else if (fs.existsSync(bannerPath)) {
+            await ctx.replyWithPhoto(
+                { source: bannerPath },
+                { caption: welcomeText, parse_mode: 'Markdown', ...getMainKeyboard(ctx) }
+            ).catch(async () => {
+                await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx)).catch(() => {});
+            });
+        } else {
+            await ctx.replyWithMarkdown(welcomeText, getMainKeyboard(ctx)).catch(() => {});
+        }
     }
 });
 
@@ -1296,6 +1323,26 @@ bot.action(/^reject_dep_(\d+)$/, async (ctx) => {
         `❌ **Deposit Request #DEP-${depId} Rejected**\n\nThe transaction ID could not be verified on Binance. Please verify your details or contact support.`,
         { parse_mode: 'Markdown' }
     ).catch(() => {});
+});
+
+// Owner Sticker Capture Tool (send any sticker to bot to extract file_id)
+bot.on('sticker', async (ctx) => {
+    if (!isOwner(ctx)) return;
+    const sticker = ctx.message.sticker;
+    const fileId = sticker.file_id;
+    const stickerType = sticker.is_animated ? 'Animated (TGS)' : (sticker.is_video ? 'Video (WebM Animation)' : 'Static (HD WebP)');
+
+    await ctx.replyWithMarkdown(
+`🎯 **NEW STICKER CAPTURED!**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🏷️ **Type:** ${stickerType}
+😀 **Emoji:** ${sticker.emoji || 'None'}
+📦 **Pack Name:** \`${sticker.set_name || 'Individual'}\`
+🔑 **Telegram File ID:**
+\`${fileId}\`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ *You can copy this ID anytime to use it anywhere in the bot!*`
+    );
 });
 
 // Handle TXID Submission & Screenshot Messages & Admin Steps
