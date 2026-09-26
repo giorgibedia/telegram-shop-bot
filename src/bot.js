@@ -1,9 +1,24 @@
+const http = require('http');
 const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 const db = require('./database');
 const binance = require('./binance');
+
+// 1. Immediately start HTTP server for Render / Cloud health check
+const PORT = process.env.PORT || 10000;
+const httpServer = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+        status: 'ok', 
+        bot: 'AI Marketplace Telegram Bot', 
+        time: new Date().toISOString() 
+    }));
+});
+httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`🌐 Keep-alive HTTP server listening on 0.0.0.0:${PORT}`);
+});
 
 // Initialize database
 db.initDb();
@@ -1627,16 +1642,12 @@ function start() {
 
 start();
 
-// Keep-alive HTTP server for Cloud Hosting (Render, Railway, Koyeb, etc.)
-const http = require('http');
-const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', bot: 'AI Marketplace Telegram Bot', time: new Date().toISOString() }));
-}).listen(PORT, () => {
-    console.log(`🌐 Keep-alive HTTP server listening on port ${PORT}`);
-});
-
 // Graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => {
+    httpServer.close();
+    bot.stop('SIGINT');
+});
+process.once('SIGTERM', () => {
+    httpServer.close();
+    bot.stop('SIGTERM');
+});
