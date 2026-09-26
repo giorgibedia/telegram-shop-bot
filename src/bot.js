@@ -847,6 +847,10 @@ ${stockSummary}
             ],
             [
                 Markup.button.callback('📢 Broadcast Message', 'admin_prompt_broadcast')
+            ],
+            [
+                Markup.button.callback('💾 Backup SQL & DB', 'admin_backup_db'),
+                Markup.button.callback('📥 Restore SQL / DB', 'admin_prompt_restore_db')
             ]
         ]);
 
@@ -1057,6 +1061,151 @@ Type \`/cancel\` to abort.`
     );
 });
 
+// Helper: Generate and send complete SQL & Database backup to chat
+async function sendDatabaseBackup(ctxOrChatId, isAuto = false) {
+    const chatId = typeof ctxOrChatId === 'object' && ctxOrChatId.chat ? ctxOrChatId.chat.id : ctxOrChatId;
+    try {
+        const backupResult = db.saveLocalBackup();
+        const sqlBuffer = Buffer.from(backupResult.sqlContent, 'utf-8');
+        const dbPath = db.getDbPath();
+
+        const stats = db.getUserStats();
+        const availableStock = db.getAllAvailableStock().length;
+
+        const caption = 
+`${isAuto ? '🤖 **AUTOMATED 24-HOUR SQL BACKUP**' : '💾 **SQL & DATABASE BACKUP EXPORT**'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 **Timestamp:** \`${new Date().toISOString().replace('T', ' ').substring(0, 19)}\`
+👥 **Total Registered Users:** \`${stats.totalUsers}\`
+📦 **Total Orders Fulfilled:** \`${stats.totalOrders}\`
+💳 **Approved Deposits:** \`$${stats.totalDeposits.toFixed(2)}\`
+🧠 **Stock Accounts in DB:** \`${availableStock} accounts\`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ *Both readable .SQL dump and SQLite .DB binary are attached.*`;
+
+        // 1. Send .SQL Dump File
+        await bot.telegram.sendDocument(chatId, {
+            source: sqlBuffer,
+            filename: backupResult.sqlFileName
+        }, {
+            caption: caption,
+            parse_mode: 'Markdown'
+        });
+
+        // 2. Send .DB Binary File
+        if (fs.existsSync(dbPath)) {
+            await bot.telegram.sendDocument(chatId, {
+                source: fs.createReadStream(dbPath),
+                filename: backupResult.dbFileName
+            }, {
+                caption: `💾 **SQLite Database Binary (.db)**\nFilename: \`${backupResult.dbFileName}\``,
+                parse_mode: 'Markdown'
+            });
+        }
+
+        console.log(`✅ SQL Backup generated and delivered to chat ${chatId}`);
+        return true;
+    } catch (err) {
+        console.error('Error generating/sending SQL backup:', err);
+        await bot.telegram.sendMessage(chatId, `⚠️ **Backup Error:** ${err.message}`, { parse_mode: 'Markdown' }).catch(() => {});
+        return false;
+    }
+}
+
+// Admin Action: Download SQL & DB Backup
+bot.action('admin_backup_db', async (ctx) => {
+    if (!isOwner(ctx)) return ctx.answerCbQuery('⛔ Access denied.');
+    await ctx.answerCbQuery('⏳ Generating SQL backup...');
+    await ctx.reply('⏳ **Generating SQL Dump & Database archive...** Please wait a few seconds.');
+    await sendDatabaseBackup(ctx, false);
+});
+
+// Admin Command: /backup, /sqldump, /savedb, /exportsql
+bot.command(['backup', 'sqldump', 'savedb', 'exportsql'], async (ctx) => {
+    if (!isOwner(ctx)) return ctx.reply('⛔ Access Denied. Only the bot Owner can download SQL backups.');
+    await ctx.reply('⏳ **Generating SQL Dump & Database archive...**');
+    await sendDatabaseBackup(ctx, false);
+});
+
+// Admin Action: Prompt Restore
+bot.action('admin_prompt_restore_db', async (ctx) => {
+    if (!isOwner(ctx)) return ctx.answerCbQuery('⛔ Access denied.');
+    await ctx.answerCbQuery();
+    userStates.set(ctx.from.id, { step: 'admin_awaiting_restore' });
+
+    const text = 
+`📥 **RESTORE SQL DATABASE**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+To restore your database from a backup:
+
+1️⃣ Send / upload your **\`.sql\`** dump file directly to this chat (or paste raw SQL queries).
+2️⃣ The bot will execute the SQL script and immediately restore all tables, users, balances, and inventory!
+
+⚠️ *Note: Restoring will overwrite existing records with the data inside the SQL file.*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👉 *Upload your \`.sql\` file now, or press cancel below:*`;
+
+    const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('🔙 Cancel / Back to Admin', 'admin_main_dashboard')]
+    ]);
+
+    await ctx.replyWithMarkdown(text, keyboard);
+});
+
+// Document Handler for SQL Restore
+bot.on('document', async (ctx) => {
+    if (!isOwner(ctx)) return;
+
+    const doc = ctx.message.document;
+    const fileName = (doc.file_name || '').toLowerCase();
+    const state = userStates.get(ctx.from.id);
+
+    const isRestoreIntent = (state && state.step === 'admin_awaiting_restore') || 
+                            fileName.endsWith('.sql') ||
+                            (ctx.message.caption && ctx.message.caption.toLowerCase().includes('restore'));
+
+    if (!isRestoreIntent) return;
+
+    if (!fileName.endsWith('.sql')) {
+        return ctx.reply('⚠️ Please upload a valid **.sql** backup file.');
+    }
+
+    try {
+        await ctx.reply('⏳ **Reading and executing SQL backup script...**');
+        const fileLink = await ctx.telegram.getFileLink(doc.file_id);
+        const response = await fetch(fileLink.href);
+        const sqlContent = await response.text();
+
+        // Safety backup of current state first
+        db.saveLocalBackup();
+
+        // Execute SQL script
+        db.executeSql(sqlContent);
+        userStates.delete(ctx.from.id);
+
+        const stats = db.getUserStats();
+        const availableStock = db.getAllAvailableStock().length;
+
+        const successMsg = 
+`✅ **DATABASE RESTORED SUCCESSFULLY!**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📁 **Restored From:** \`${doc.file_name}\`
+👥 **Total Registered Users:** \`${stats.totalUsers}\`
+📦 **Total Orders:** \`${stats.totalOrders}\`
+💳 **Approved Deposits:** \`$${stats.totalDeposits.toFixed(2)}\`
+🧠 **Real Inventory Stock:** \`${availableStock} accounts\`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎉 *All data, user balances, and inventory are restored and active!*`;
+
+        await ctx.replyWithMarkdown(successMsg, Markup.inlineKeyboard([
+            [Markup.button.callback('👑 Open Admin Panel', 'admin_main_dashboard')]
+        ]));
+    } catch (err) {
+        console.error('SQL Restore Error:', err);
+        await ctx.reply(`❌ **SQL Restore Failed:** ${err.message}`);
+    }
+});
+
 // Admin command: /addbalance <userId> <amount>
 bot.command('addbalance', async (ctx) => {
     if (!isOwner(ctx)) {
@@ -1204,6 +1353,25 @@ bot.on(['text', 'photo'], async (ctx) => {
             } catch (e) {}
         }
         return ctx.reply(`📢 Broadcast successfully delivered to ${sentCount} user(s)!`, getMainKeyboard(ctx));
+    }
+
+    // 2.5 Admin SQL Restore Step
+    if (isOwner(ctx) && state && state.step === 'admin_awaiting_restore') {
+        if (textMsg === '/cancel') {
+            userStates.delete(userId);
+            return ctx.reply('❌ SQL Restore cancelled.', getMainKeyboard(ctx));
+        }
+        if (textMsg.toUpperCase().includes('INSERT INTO') || textMsg.toUpperCase().includes('CREATE TABLE')) {
+            try {
+                db.saveLocalBackup();
+                db.executeSql(textMsg);
+                userStates.delete(userId);
+                const stats = db.getUserStats();
+                return ctx.reply(`✅ **Raw SQL executed and saved!**\nUsers: ${stats.totalUsers} | Orders: ${stats.totalOrders}`);
+            } catch (err) {
+                return ctx.reply(`❌ **SQL Error:** ${err.message}`);
+            }
+        }
     }
 
     // 3. User Message Log for Owner @Giooo12be
@@ -1398,6 +1566,16 @@ function start() {
     }).catch((err) => {
         console.error('❌ Bot Launch Error:', err);
     });
+
+    // Automatic 24-Hour SQL & Database Backup to Owner
+    setInterval(() => {
+        if (currentAdminId) {
+            console.log('⏰ Running automatic 24-hour SQL backup for Owner...');
+            sendDatabaseBackup(currentAdminId, true).catch(err => {
+                console.error('Auto backup error:', err.message);
+            });
+        }
+    }, 24 * 60 * 60 * 1000);
 }
 
 start();

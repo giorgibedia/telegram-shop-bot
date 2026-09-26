@@ -334,6 +334,111 @@ function dispenseMultipleStockAccounts(productId, count, orderId = null) {
     return accounts;
 }
 
+/**
+ * Generate full human-readable SQL dump (.sql) of all tables and data
+ */
+function generateSqlDump() {
+    const tables = ['users', 'products', 'orders', 'deposits', 'account_stock'];
+    let dump = `-- =====================================================\n`;
+    dump += `-- AI MARKETPLACE BOT - COMPLETE SQL DATABASE DUMP\n`;
+    dump += `-- Generated At: ${new Date().toISOString()}\n`;
+    dump += `-- =====================================================\n\n`;
+    dump += `PRAGMA foreign_keys = OFF;\n\n`;
+
+    for (const table of tables) {
+        const schemaRow = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name = ?`).get(table);
+        if (schemaRow && schemaRow.sql) {
+            dump += `-- -----------------------------------------------------\n`;
+            dump += `-- Table structure for "${table}"\n`;
+            dump += `-- -----------------------------------------------------\n`;
+            dump += `DROP TABLE IF EXISTS "${table}";\n`;
+            dump += `${schemaRow.sql};\n\n`;
+        }
+
+        const rows = db.prepare(`SELECT * FROM "${table}"`).all();
+        if (rows.length > 0) {
+            dump += `-- Dumping data for table "${table}" (${rows.length} records)\n`;
+            for (const row of rows) {
+                const cols = Object.keys(row);
+                const colList = cols.map(c => `"${c}"`).join(', ');
+                const valList = cols.map(c => {
+                    const val = row[c];
+                    if (val === null || val === undefined) return 'NULL';
+                    if (typeof val === 'number') return val;
+                    return `'${String(val).replace(/'/g, "''")}'`;
+                }).join(', ');
+                dump += `INSERT INTO "${table}" (${colList}) VALUES (${valList});\n`;
+            }
+            dump += '\n';
+        }
+    }
+
+    // Indexes
+    const indexRows = db.prepare(`SELECT sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%'`).all();
+    if (indexRows.length > 0) {
+        dump += `-- -----------------------------------------------------\n`;
+        dump += `-- Indexes\n`;
+        dump += `-- -----------------------------------------------------\n`;
+        for (const idx of indexRows) {
+            dump += `${idx.sql};\n`;
+        }
+        dump += '\n';
+    }
+
+    dump += `PRAGMA foreign_keys = ON;\n`;
+    dump += `-- ======================= END OF DUMP =======================\n`;
+    return dump;
+}
+
+/**
+ * Execute an arbitrary SQL script (used for database restoration)
+ */
+function executeSql(sqlContent) {
+    if (!sqlContent || typeof sqlContent !== 'string') {
+        throw new Error('Invalid SQL script content');
+    }
+    db.exec(sqlContent);
+    return true;
+}
+
+/**
+ * Get path to active SQLite database file
+ */
+function getDbPath() {
+    return dbPath;
+}
+
+/**
+ * Save backup copies (.sql and .db) to disk
+ */
+function saveLocalBackup(customDir = null) {
+    const fs = require('fs');
+    const dir = customDir || path.resolve(__dirname, '..', 'backups');
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const sqlFileName = `ai_market_backup_${timestamp}.sql`;
+    const dbFileName = `ai_market_backup_${timestamp}.db`;
+    const sqlPath = path.join(dir, sqlFileName);
+    const dbCopyPath = path.join(dir, dbFileName);
+
+    const sqlContent = generateSqlDump();
+    fs.writeFileSync(sqlPath, sqlContent, 'utf-8');
+    if (fs.existsSync(dbPath)) {
+        fs.copyFileSync(dbPath, dbCopyPath);
+    }
+
+    return {
+        sqlPath,
+        dbCopyPath,
+        sqlFileName,
+        dbFileName,
+        sqlContent,
+        timestamp
+    };
+}
+
 module.exports = {
     initDb,
     seedProducts,
@@ -362,4 +467,8 @@ module.exports = {
     dispenseStockAccount,
     dispenseMultipleStockAccounts,
     deleteStockAccount,
+    generateSqlDump,
+    executeSql,
+    getDbPath,
+    saveLocalBackup,
 };
