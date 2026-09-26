@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs');
 const path = require('path');
@@ -19,6 +20,24 @@ const httpServer = http.createServer((req, res) => {
 httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Keep-alive HTTP server listening on 0.0.0.0:${PORT}`);
 });
+
+// 2. Keep-Alive Self-Ping (Prevents Render Free Tier from sleeping after 15-30 minutes)
+const pingTargetUrl = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL;
+if (pingTargetUrl) {
+    console.log(`📡 Keep-Alive auto-pinger enabled for: ${pingTargetUrl}`);
+    setInterval(() => {
+        try {
+            const client = pingTargetUrl.startsWith('https') ? https : http;
+            client.get(pingTargetUrl, (res) => {
+                console.log(`⏰ [Keep-Alive] Ping sent to ${pingTargetUrl} (Status: ${res.statusCode})`);
+            }).on('error', (err) => {
+                console.warn('Keep-alive ping warning:', err.message);
+            });
+        } catch (e) {
+            console.warn('Keep-alive exception:', e.message);
+        }
+    }, 7 * 60 * 1000); // Ping every 7 minutes (Render sleeps after 15-30 minutes)
+}
 
 // Initialize database
 db.initDb();
