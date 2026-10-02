@@ -17,8 +17,9 @@ const httpServer = http.createServer((req, res) => {
         time: new Date().toISOString() 
     }));
 });
-httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌐 Keep-alive HTTP server listening on 0.0.0.0:${PORT}`);
+const HOST = process.env.IP || '0.0.0.0';
+httpServer.listen(PORT, HOST, () => {
+    console.log(`🌐 Keep-alive HTTP server listening on ${HOST}:${PORT}`);
 });
 
 // 2. Keep-Alive Self-Ping (Prevents Render Free Tier from sleeping after 15-30 minutes)
